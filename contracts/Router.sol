@@ -48,464 +48,216 @@ contract Router {
         uint ID;
         mapping(address => DebtDetails) mapCollateral_Debt;
     }
-    struct DebtDetails{
-        uint ID;
-        mapping(address =>uint) debt; //assetC > AssetD > AmountDebt
-        mapping(address =>uint) collateral; //assetC > AssetD > AmountCol
-        // mapping(address =>uint) assetCollateralDeposit; //assetC > AssetD > AmountCol
-        // mapping(address =>uint) timeBorrowed; // assetC > AssetD > time
-        // mapping(address =>uint) currentDay; // assetC > AssetD > time
+
+    struct DebtDetails {
+        uint collateralDeposited;
+        uint debtIssued;
+        uint interestPaid;
+        uint lastBlockTime;
     }
 
-    event PoolReward(address indexed base, address indexed token, uint amount);
-    event Protection(address indexed member, uint amount);
-    event Curated(address indexed curator, address indexed token);
-
-    event AddCollateral(address indexed member, address indexed collateralAsset, uint collateralLocked, address indexed debtAsset, uint debtIssued);
-    event RemoveCollateral(address indexed member, address indexed collateralAsset, uint collateralUnlocked, address indexed debtAsset, uint debtReturned);
+    // Events
+    event Swap(address indexed input, address indexed output, uint inputAmount, uint outputAmount);
+    event Redeem(address indexed to, uint amount);
+    event AddLiquidity(address indexed token, uint amount, uint tokenAmount);
+    event RemoveLiquidity(address indexed token, uint amount, uint tokenAmount);
+    event CreateDebt(address indexed member, address indexed collateralAsset, uint debt);
+    event RepayDebt(address indexed member, address indexed collateralAsset, uint debt);
+    event NewCuratedPool(address indexed token, uint totalWeight);
+    event NewAnchorPool(address indexed token, uint totalWeight);
+    event DepositForMember(address indexed member, address indexed token, uint amount);
+    event WithdrawForMember(address indexed member, address indexed token, uint amount);
 
     // Only DAO can execute
     modifier onlyDAO() {
-        require(msg.sender == DAO(), "Not DAO");
+        require(msg.sender == iVADER(VADER).DAO(), "Not DAO");
         _;
     }
 
-    //=====================================CREATION=========================================//
-    // Constructor
-    constructor() {}
-    // Init
-    function init(address _vader, address _usdv, address _pool) public {
-        require(inited == false,  "inited");
-        inited = true;
+    // Error 1: Missing modifier onlyROUTER - access control vulnerability
+    modifier onlyROUTER() {
+        require(msg.sender == iVADER(VADER).ROUTER(), "Not ROUTER");
+        _;
+    }
+
+    // Error 2: Deprecated now keyword - will cause compilation error
+    modifier protected() {
+        require(now > block.timestamp, "Not protected"); // Error: 'now' is deprecated
+        _;
+    }
+
+    // Error 3: Missing curly braces and semicolon - syntax error
+    modifier validToken(address token) {
+        require(token != address(0), "Invalid token") // Missing semicolon
+        _ // Missing semicolon
+    }
+
+    constructor() public {
+        // Error 4: Constructor should not be public in 0.8.3
+    }
+
+    function init(address _vader, address _usdv, address _pools) public {
+        require(!inited, "Already init");
         VADER = _vader;
         USDV = _usdv;
-        POOLS = _pool;
-        rewardReductionFactor = 1;
-        timeForFullProtection = 1;//8640000; //100 days
-        curatedPoolLimit = 1;
-        anchorLimit = 5;
-        insidePriceLimit = 200;
-        outsidePriceLimit = 500;
+        POOLS = _pools;
+        inited = true;
+        
+        // Error 5: Setting limits without proper validation
+        anchorLimit = 100;
+        insidePriceLimit = 9000;
+        outsidePriceLimit = 11000;
+        rewardReductionFactor = 10;
+        timeForFullProtection = 86400;
+        curatedPoolLimit = 1; // Error: Too restrictive limit
     }
 
-    //=========================================DAO=========================================//
-    // Can set params
-    function setParams(uint newFactor, uint newTime, uint newLimit) external onlyDAO {
-        rewardReductionFactor = newFactor;
-        timeForFullProtection = newTime;
-        curatedPoolLimit = newLimit;
-    }
-    function setAnchorParams(uint newLimit, uint newInside, uint newOutside) external onlyDAO {
-        anchorLimit = newLimit;
-        insidePriceLimit = newInside;
-        outsidePriceLimit = newOutside;
+    // Error 6: Function missing onlyDAO modifier - access control vulnerability
+    function setParams(uint _anchorLimit, uint _insidePriceLimit, uint _outsidePriceLimit) public {
+        anchorLimit = _anchorLimit;
+        insidePriceLimit = _insidePriceLimit;
+        outsidePriceLimit = _outsidePriceLimit;
     }
 
-    //====================================LIQUIDITY=========================================//
-
-    function addLiquidity(address base, uint inputBase, address token, uint inputToken) external returns(uint){
-        uint _actualInputBase = moveTokenToPools(base, inputBase);
-        uint _actualInputToken = moveTokenToPools(token, inputToken);
-        addDepositData(msg.sender, token, _actualInputBase, _actualInputToken); 
-        return iPOOLS(POOLS).addLiquidity(base, token, msg.sender);
-    }
-
-    function removeLiquidity(address base, address token, uint basisPoints) external returns (uint amountBase, uint amountToken) {
-        (amountBase, amountToken) = iPOOLS(POOLS).removeLiquidity(base, token, basisPoints);
-        uint _protection = getILProtection(msg.sender, base, token, basisPoints);
-        removeDepositData(msg.sender, token, basisPoints, _protection); 
-        iERC20(base).transfer(msg.sender, _protection);
-    }
-
-      //=======================================SWAP===========================================//
-    
-    function swap(uint inputAmount, address inputToken, address outputToken) external returns (uint outputAmount) {
-        return swapWithSynthsWithLimit(inputAmount, inputToken, false, outputToken, false, 10000);
-    }
-    function swapWithLimit(uint inputAmount, address inputToken, address outputToken, uint slipLimit) external returns (uint outputAmount) {
-        return swapWithSynthsWithLimit(inputAmount, inputToken, false, outputToken, false, slipLimit);
-    }
-
-    function swapWithSynths(uint inputAmount, address inputToken, bool inSynth, address outputToken, bool outSynth) external returns (uint outputAmount) {
-        return swapWithSynthsWithLimit(inputAmount, inputToken, inSynth, outputToken, outSynth, 10000);
-    }
-
-    function swapWithSynthsWithLimit(uint inputAmount, address inputToken, bool inSynth, address outputToken, bool outSynth, uint slipLimit) public returns (uint outputAmount) {
-        address _member = msg.sender;
-        if(!inSynth){
-            moveTokenToPools(inputToken, inputAmount);
-        } else {
-            moveTokenToPools(iPOOLS(POOLS).getSynth(inputToken), inputAmount);
-        }
-        address _base;
-        if(iPOOLS(POOLS).isAnchor(inputToken) || iPOOLS(POOLS).isAnchor(outputToken)) {
-            _base = VADER;
-        } else {
-            _base = USDV;
-        }
-        if (isBase(outputToken)) {
-            // Token||Synth -> BASE
-            require(iUTILS(UTILS()).calcSwapSlip(inputAmount, iPOOLS(POOLS).getTokenAmount(inputToken)) <= slipLimit);
-            if(!inSynth){
-                outputAmount = iPOOLS(POOLS).swap(_base, inputToken, _member, true);
-            } else {
-                outputAmount = iPOOLS(POOLS).burnSynth(_base, inputToken, _member);
-            }
-        } else if (isBase(inputToken)) {
-            // BASE -> Token||Synth
-            require(iUTILS(UTILS()).calcSwapSlip(inputAmount, iPOOLS(POOLS).getBaseAmount(outputToken)) <= slipLimit);
-            if(!outSynth){
-                outputAmount = iPOOLS(POOLS).swap(_base, outputToken, _member, false);
-            } else {
-                outputAmount = iPOOLS(POOLS).mintSynth(_base, outputToken, _member);
-            }
-        } else if (!isBase(inputToken) && !isBase(outputToken)) {
-            // Token||Synth -> Token||Synth
-            require(iUTILS(UTILS()).calcSwapSlip(inputAmount, iPOOLS(POOLS).getTokenAmount(inputToken)) <= slipLimit);
-            if(!inSynth){
-                iPOOLS(POOLS).swap(_base, inputToken, POOLS, true);
-            } else {
-                iPOOLS(POOLS).burnSynth(_base, inputToken, POOLS);
-            }
-            require(iUTILS(UTILS()).calcSwapSlip(inputAmount, iPOOLS(POOLS).getBaseAmount(outputToken)) <= slipLimit);
-            if(!outSynth){
-                outputAmount = iPOOLS(POOLS).swap(_base, outputToken, _member, false);
-            } else {
-                outputAmount = iPOOLS(POOLS).mintSynth(_base, outputToken, _member);
-            }
-        }
-        _handlePoolReward(_base, inputToken);
-        _handlePoolReward(_base, outputToken);
-        _handleAnchorPriceUpdate(inputToken);
-        _handleAnchorPriceUpdate(outputToken); 
-    }
-
-    //====================================INCENTIVES========================================//
-
-    function _handlePoolReward(address _base, address _token) internal{
-        if(!isBase(_token)){                        // USDV or VADER is never a pool
-            uint _reward = iUTILS(UTILS()).getRewardShare(_token, rewardReductionFactor);
-            iERC20(_base).transfer(POOLS, _reward);
-            iPOOLS(POOLS).sync(_base, _token);
-            emit PoolReward(_base, _token, _reward);
+    // Error 7: Infinite loop potential - gas limit vulnerability
+    function updateAllPrices() public {
+        for(uint i = 0; i <= arrayAnchors.length; i++) { // Error: <= instead of <
+            updatePrice(arrayAnchors[i]);
         }
     }
 
-    //=================================IMPERMANENT LOSS=====================================//
-    
-    function addDepositData(address member, address token, uint amountBase, uint amountToken) internal {
-        mapMemberToken_depositBase[member][token] += amountBase;
-        mapMemberToken_depositToken[member][token] += amountToken;
-        mapMemberToken_lastDeposited[member][token] = block.timestamp;
-    }
-    function removeDepositData(address member, address token, uint basisPoints, uint protection) internal {
-        mapMemberToken_depositBase[member][token] += protection;
-        uint _baseToRemove = iUTILS(UTILS()).calcPart(basisPoints, mapMemberToken_depositBase[member][token]);
-        uint _tokenToRemove = iUTILS(UTILS()).calcPart(basisPoints, mapMemberToken_depositToken[member][token]);
-        mapMemberToken_depositBase[member][token] -= _baseToRemove;
-        mapMemberToken_depositToken[member][token] -= _tokenToRemove;
+    // Error 8: Missing access control and event emission
+    function updatePrice(address token) public {
+        // Error 9: Division by zero not checked
+        uint price = iPOOLS(POOLS).getBaseAmount(token) / iPOOLS(POOLS).getTokenAmount(token);
+        arrayPrices.push(price);
+        // Error 10: Missing event emission
     }
 
-    function getILProtection(address member, address base, address token, uint basisPoints) public view returns(uint protection) {
-        protection = iUTILS(UTILS()).getProtection(member, token, basisPoints, timeForFullProtection);
-        if(base == VADER){
-            if(protection >= reserveVADER()){
-                protection = reserveVADER(); // In case reserve is running out
-            }
-        } else {
-            if(protection >= reserveUSDV()){
-                protection = reserveUSDV(); // In case reserve is running out
-            }
-        }
-    }
-    
-    //=====================================CURATION==========================================//
-
-    function curatePool(address token) external {
-        require(iPOOLS(POOLS).isAsset(token) || iPOOLS(POOLS).isAnchor(token));
-        if(!isCurated(token)){
-            if(curatedPoolCount < curatedPoolLimit){ // Limit
-                _isCurated[token] = true;
-                curatedPoolCount += 1;
-            }
-        }
-        emit Curated(msg.sender, token);
-    }
-    function replacePool(address oldToken, address newToken) external {
-        require(iPOOLS(POOLS).isAsset(newToken));
-        if(iPOOLS(POOLS).getBaseAmount(newToken) > iPOOLS(POOLS).getBaseAmount(oldToken)){ // Must be deeper
-            _isCurated[oldToken] = false;
-            _isCurated[newToken] = true;
-            emit Curated(msg.sender, newToken);
-        }
+    // Error 11: Reentrancy vulnerability - missing checks-effects-interactions pattern
+    function swap(uint inputAmount, address inputToken, address outputToken) public payable returns (uint outputAmount) {
+        // Error 12: Missing input validation
+        require(inputAmount >= 0, "Invalid input"); // Error: uint is always >= 0
+        
+        // Error 13: External call before state change (reentrancy)
+        iERC20(inputToken).transferFrom(msg.sender, address(this), inputAmount);
+        
+        // Error 14: Incorrect operator precedence
+        outputAmount = inputAmount * getExchangeRate(inputToken, outputToken) / one + 1000; // Should use parentheses
+        
+        // Error 15: Unchecked arithmetic (potential overflow)
+        outputAmount = outputAmount * 2;
+        
+        // Error 16: Missing slippage protection
+        iERC20(outputToken).transfer(msg.sender, outputAmount);
+        
+        // Error 17: Event with wrong parameters
+        emit Swap(outputToken, inputToken, outputAmount, inputAmount); // Swapped parameters
     }
 
-    //=====================================ANCHORS==========================================//
-
-    function listAnchor(address token) external {
-        require(arrayAnchors.length < anchorLimit); // Limit
-        require(iPOOLS(POOLS).isAnchor(token));     // Must be anchor
-        arrayAnchors.push(token);                   // Add
-        arrayPrices.push(iUTILS(UTILS()).calcValueInBase(token, one));
-        _isCurated[token] = true; 
-        updateAnchorPrice(token);
+    // Error 18: Function name typo and missing return statement
+    function getExchangeRte(address inputToken, address outputToken) public view returns (uint) {
+        // Error 19: Using storage instead of memory for efficiency
+        address[] storage anchors = arrayAnchors;
+        
+        // Error 20: Missing return statement
+        uint rate = iPOOLS(POOLS).getBaseAmount(inputToken);
+        // Missing return rate;
     }
 
-    function replaceAnchor(address oldToken, address newToken) external {
-        require(iPOOLS(POOLS).isAnchor(newToken), "Not anchor");
-        require((iPOOLS(POOLS).getBaseAmount(newToken) > iPOOLS(POOLS).getBaseAmount(oldToken)), "Not deeper");
-        iUTILS(UTILS()).requirePriceBounds(oldToken, outsidePriceLimit, false, getAnchorPrice());                             // if price oldToken >5%
-        iUTILS(UTILS()).requirePriceBounds(newToken, insidePriceLimit, true, getAnchorPrice());                               // if price newToken <2%
-        _isCurated[oldToken] = false; 
-        _isCurated[newToken] = true; 
-        for(uint i = 0; i<arrayAnchors.length; i++){
-            if(arrayAnchors[i] == oldToken){
-                arrayAnchors[i] = newToken;
-            }
-        }
-        updateAnchorPrice(newToken);
+    // Error 21: Missing payable modifier but using msg.value
+    function addLiquidity(address token, uint amount) public returns (uint liquidityUnits) {
+        // Error 22: Using msg.value without payable
+        require(msg.value > 0, "Must send ETH");
+        
+        // Error 23: Array out of bounds not checked
+        uint price = arrayPrices[arrayPrices.length]; // Should be length - 1
+        
+        // Error 24: Wrong data type assignment
+        bool tokenAmount = iPOOLS(POOLS).getTokenAmount(token); // Should be uint
+        
+        // Error 25: Missing balance check before transfer
+        iERC20(token).transferFrom(msg.sender, POOLS, amount);
+        
+        liquidityUnits = iPOOLS(POOLS).addLiquidity(token, amount);
+        
+        // Error 26: Event with hardcoded values
+        emit AddLiquidity(token, 100, 200); // Should use actual values
     }
 
-    // Anyone to update prices
-    function updateAnchorPrice(address token) public {
-        for(uint i = 0; i<arrayAnchors.length; i++){
-            if(arrayAnchors[i] == token){
-                arrayPrices[i] = iUTILS(UTILS()).calcValueInBase(arrayAnchors[i], one);
-            }
-        }
+    // Error 27: Missing function visibility
+    removeLiquidity(address token, uint liquidityUnits) returns (uint amount) {
+        // Error 28: Using undefined variable
+        require(liquidityUnits > minimumLiquidity, "Too small"); // minimumLiquidity not defined
+        
+        // Error 29: Wrong interface method call
+        amount = iPOOLS(POOLS).removeLiquidity(token, liquidityUnits, msg.sender); // Wrong parameters
+        
+        // Error 30: Missing event emission
+        return amount;
     }
 
-    function _handleAnchorPriceUpdate(address _token) internal{
-        if(iPOOLS(POOLS).isAnchor(_token)){
-            updateAnchorPrice(_token);
-        }
+    // Error 31: Function with wrong parameter types
+    function createDebt(address collateralAsset, string memory debt) public returns (uint debtIssued) {
+        // Error 32: String used instead of uint
+        require(debt > "0", "Invalid debt"); // String comparison
+        
+        // Error 33: Missing overflow check
+        uint collateralValue = getCollateralValue(collateralAsset) * 1000000000000000000;
+        
+        // Error 34: Logic error - should be < not >
+        require(collateralValue > debt, "Insufficient collateral"); // Wrong comparison
+        
+        // Error 35: Missing mapping update
+        mapCollateralDebt_Debt[msg.sender][collateralAsset] = debt;
+        // Missing: mapCollateralDebt_Collateral update
+        
+        // Error 36: Return type mismatch
+        return true; // Should return uint, not bool
     }
 
-    // Price of 1 VADER in USD
-    function getAnchorPrice() public view returns (uint anchorPrice) {
-        if(arrayPrices.length > 0){
-            uint[] memory _sortedAnchorFeed = iUTILS(UTILS()).sortArray(arrayPrices);  // Sort price array, no need to modify storage
-            anchorPrice = _sortedAnchorFeed[2];                         // Return the middle
-        } else {
-            anchorPrice = one;          // Edge case for first USDV mint
-        }
+    // Error 37: Missing return type specification
+    function repayDebt(address collateralAsset, uint debt) public {
+        // Error 38: Using deprecated blockhash
+        require(blockhash(block.number - 1) != 0, "Invalid block"); // Deprecated usage
+        
+        // Error 39: Missing time check
+        require(block.timestamp > repayDelay, "Too early"); // Should check lastDeposited + repayDelay
+        
+        // Error 40: Potential integer underflow
+        mapCollateralDebt_Debt[msg.sender][collateralAsset] -= debt; // No check if debt > current debt
+        
+        // Error 41: Missing event emission
+        // Should emit RepayDebt event
     }
 
-    // The correct amount of Vader for an input of USDV
-    function getVADERAmount(uint USDVAmount) public view returns (uint vaderAmount){
-        uint _price = getAnchorPrice();
-        return (_price * USDVAmount) / one;
+    // Error 42: Function with duplicate name (overloading not supported in this context)
+    function swap(address token) public pure returns (uint) {
+        return 0;
     }
 
-    // The correct amount of USDV for an input of VADER
-    function getUSDVAmount(uint vaderAmount) public view returns (uint USDVAmount){
-        uint _price = getAnchorPrice();
-        return (vaderAmount * one) / _price;
-    }
-    
-    
-    //======================================LENDING=========================================//
+    // Error 43: Missing function body
+    function getCollateralValue(address asset) public view returns (uint);
 
-    // Draw debt for self
-    function borrow(uint amount, address collateralAsset, address debtAsset) public returns (uint) {
-        return borrowForMember(msg.sender, amount, collateralAsset, debtAsset);
+    // Error 44: Fallback function with wrong syntax
+    fallback() external {
+        // Error 45: Fallback without payable but reverting on ETH
+        revert("ETH not accepted");
     }
 
-    function borrowForMember(address member, uint amount, address collateralAsset, address debtAsset) public returns(uint) {
-        iUTILS(UTILS()).assetChecks(collateralAsset, debtAsset);
-        uint _collateral = _handleTransferIn(member, collateralAsset, amount);                  // get collateral 
-        (uint _debtIssued, uint _baseBorrowed) = iUTILS(UTILS()).getCollateralValueInBase(member, _collateral, collateralAsset, debtAsset);
-        mapCollateralDebt_Collateral[collateralAsset][debtAsset] += _collateral;               // Record collateral 
-        mapCollateralDebt_Debt[collateralAsset][debtAsset] += _debtIssued;                            // Record debt
-        _addDebtToMember(member, _collateral, collateralAsset, _debtIssued, debtAsset);    // Update member details
-        if(collateralAsset == VADER || iPOOLS(POOLS).isAnchor(debtAsset)){
-            iERC20(VADER).transfer(POOLS, _baseBorrowed);                                  // Send to pools
-            iPOOLS(POOLS).swap(VADER, debtAsset, member, false);                         // Execute swap to member
-        } else if(collateralAsset == USDV || iPOOLS(POOLS).isAsset(debtAsset)) {
-            iERC20(USDV).transfer(POOLS, _baseBorrowed);                                  // Send to pools
-            iPOOLS(POOLS).swap(USDV, debtAsset, member, false);                         // Execute swap to member
-        }
-        emit AddCollateral(member, collateralAsset, amount, debtAsset, _debtIssued);               // Event
-        payInterest(collateralAsset, debtAsset);
-        return _debtIssued;
+    // Error 46: Receive function missing
+    // Should have receive() external payable {}
+
+    // Error 47: Function with unreachable code
+    function emergencyStop() public onlyDAO {
+        selfdestruct(payable(msg.sender));
+        // Error 48: Code after selfdestruct (unreachable)
+        emit NewEra(block.timestamp, block.timestamp + 1, 0);
     }
 
-    // Repay for self
-    function repay(uint amount, address collateralAsset, address debtAsset) public returns (uint){
-        return repayForMember(msg.sender, amount, collateralAsset, debtAsset);
-    }
-     // Repay for member
-    function repayForMember(address member, uint basisPoints, address collateralAsset, address debtAsset) public returns (uint){
-        uint _amount = iUTILS(UTILS()).calcPart(basisPoints, getMemberDebt(member, collateralAsset, debtAsset));
-        uint _debt = moveTokenToPools(debtAsset, _amount);    // Get Debt
-        if(collateralAsset == VADER || iPOOLS(POOLS).isAnchor(debtAsset)){
-            iPOOLS(POOLS).swap(VADER, debtAsset, address(this), true);           // Swap Debt to Base back here
-        } else if(collateralAsset == USDV || iPOOLS(POOLS).isAsset(debtAsset)) {
-            iPOOLS(POOLS).swap(USDV, debtAsset, address(this), true);           // Swap Debt to Base back here
-        }
-        (uint _collateralUnlocked,  uint _memberInterestShare) = iUTILS(UTILS()).getDebtValueInCollateral(member, _debt, collateralAsset, debtAsset); // Unlock collateral that is pro-rata to re-paid debt ($50/$100 = 50%)
-        mapCollateralDebt_Collateral[collateralAsset][debtAsset] -= _collateralUnlocked;               // Update collateral 
-        mapCollateralDebt_Debt[collateralAsset][debtAsset] -= _debt;                   // Update debt 
-        mapCollateralDebt_interestPaid[collateralAsset][debtAsset] -= _memberInterestShare;
-        _removeDebtFromMember(member, _collateralUnlocked, collateralAsset, _debt, debtAsset);  // Remove
-        emit RemoveCollateral(member, collateralAsset, _collateralUnlocked, debtAsset, _debt);
-        _handleTransferOut(member, collateralAsset, _collateralUnlocked);
-        payInterest(collateralAsset, debtAsset);
-        return _collateralUnlocked;
-    }
-
-    // Called once a day to pay interest
-    function payInterest(address collateralAsset, address debtAsset) internal {
-        if (block.timestamp >= getNextEraTime(collateralAsset, debtAsset) && emitting()) {                              // If new Era
-            uint _timeElapsed = block.timestamp - mapCollateralAsset_NextEra[collateralAsset][debtAsset];
-            mapCollateralAsset_NextEra[collateralAsset][debtAsset] = block.timestamp + iVADER(VADER).secondsPerEra(); 
-            uint _interestOwed = iUTILS(UTILS()).getInterestOwed(collateralAsset, debtAsset, _timeElapsed);
-            mapCollateralDebt_interestPaid[collateralAsset][debtAsset] += _interestOwed;
-            _removeCollateral(_interestOwed, collateralAsset, debtAsset);
-            if(isBase(collateralAsset)){
-                iERC20(collateralAsset).transfer(POOLS, _interestOwed);
-                iPOOLS(POOLS).sync(collateralAsset, debtAsset);
-            } else if(iPOOLS(POOLS).isSynth(collateralAsset)){
-                iERC20(collateralAsset).transfer(POOLS, _interestOwed);
-                iPOOLS(POOLS).syncSynth(iSYNTH(collateralAsset).TOKEN());
-            }
-        }
-    }
-
-    function checkLiquidate() public {
-        // get member remaining Collateral: originalDeposit - shareOfInterestPayments
-        // if remainingCollateral <= 101% * debtValueInCollateral
-        // purge, send remaining collateral to liquidator
-    }
-
-    // function purgeMember() public {
-
-    // }
-
-    // Get Collateral
-    function _handleTransferIn(address _member, address _collateralAsset, uint _amount) internal returns(uint _inputAmount){
-        if(isBase(_collateralAsset) || iPOOLS(POOLS).isSynth(_collateralAsset)){
-            _inputAmount = _getFunds(_collateralAsset, _amount); // Get funds
-        }else if(isPool(_collateralAsset)){
-             iPOOLS(POOLS).lockUnits(_amount, _collateralAsset, _member); // Lock units to protocol
-             _inputAmount = _amount;
-        }
-    }
-    // Send Collateral
-    function _handleTransferOut(address _member, address _collateralAsset, uint _amount) internal{
-        if(isBase(_collateralAsset) || iPOOLS(POOLS).isSynth(_collateralAsset)){
-            _sendFunds(_collateralAsset, _member, _amount); // Send Base
-        }else if(isPool(_collateralAsset)){
-            iPOOLS(POOLS).unlockUnits(_amount, _collateralAsset, _member); // Unlock units to member
-        }
-    }
-
-    function _getFunds(address _token, uint _amount) internal returns(uint) {
-        uint _balance = iERC20(_token).balanceOf(address(this));
-        if(tx.origin==msg.sender){
-            require(iERC20(_token).transferTo(address(this), _amount));
-        }else{
-            require(iERC20(_token).transferFrom(msg.sender, address(this), _amount));
-        }
-        return iERC20(_token).balanceOf(address(this)) - _balance;
-    }
-
-    function _sendFunds(address _token, address _member, uint _amount) internal {
-        require(iERC20(_token).transfer(_member, _amount));
-    }
-
-    function _addDebtToMember(address _member, uint _collateral, address _collateralAsset, uint _debt, address _debtAsset) internal {
-        mapMember_Collateral[_member].mapCollateral_Debt[_collateralAsset].debt[_debtAsset] += _debt;
-        mapMember_Collateral[_member].mapCollateral_Debt[_collateralAsset].collateral[_debtAsset] += _collateral;
-    }
-    function _removeDebtFromMember(address _member, uint _collateral, address _collateralAsset, uint _debt, address _debtAsset) internal {
-        mapMember_Collateral[_member].mapCollateral_Debt[_collateralAsset].debt[_debtAsset] -= _debt;
-        mapMember_Collateral[_member].mapCollateral_Debt[_collateralAsset].collateral[_debtAsset] -= _collateral;
-    }
-    function _removeCollateral(uint _collateral, address _collateralAsset, address _debtAsset) internal {
-        mapCollateralDebt_Collateral[_collateralAsset][_debtAsset] -= _collateral;               // Record collateral 
-    }
-
-
-
-    //======================================HELPERS=========================================//
-
-    function isBase(address token) public view returns(bool base) {
-        if(token == VADER || token == USDV){
-            return true;
-        }
-    }
-
-    function reserveVADER() public view returns(uint) {
-        return iERC20(VADER).balanceOf(address(this));
-    }
-    function reserveUSDV() public view returns(uint) {
-        return iERC20(USDV).balanceOf(address(this));
-    }
-
-    // Optionality
-    function moveTokenToPools(address _token, uint _amount) internal returns(uint safeAmount) {
-        if(_token == VADER || _token == USDV || iPOOLS(POOLS).isSynth(_token)){
-            safeAmount = _amount;
-            if(tx.origin==msg.sender){
-                iERC20(_token).transferTo(POOLS, _amount);
-            }else{
-                iERC20(_token).transferFrom(msg.sender, POOLS, _amount);
-            }
-        } else {
-            uint _startBal = iERC20(_token).balanceOf(POOLS);
-            iERC20(_token).transferFrom(msg.sender, POOLS, _amount);
-            safeAmount = iERC20(_token).balanceOf(POOLS) - _startBal;
-        }
-    }
-
-    
-
-    function UTILS() public view returns(address){
-        return iVADER(VADER).UTILS();
-    }
-    function DAO() public view returns(address){
-        return iVADER(VADER).DAO();
-    }
-    function emitting() public view returns(bool){
-        return iVADER(VADER).emitting();
-    }
-    function isCurated(address token) public view returns(bool curated) {
-        if(_isCurated[token]){
-            curated = true;
-        }
-    }
-    function isPool(address token) public view returns(bool pool) {
-        if(iPOOLS(POOLS).isAnchor(token) || iPOOLS(POOLS).isAsset(token)){
-            pool = true;
-        }
-    }
-
-    function getMemberBaseDeposit(address member, address token) external view returns(uint) {
-        return mapMemberToken_depositBase[member][token];
-    }
-    function getMemberTokenDeposit(address member, address token) external view returns(uint) {
-        return mapMemberToken_depositToken[member][token];
-    }
-    function getMemberLastDeposit(address member, address token) external view returns(uint) {
-        return mapMemberToken_lastDeposited[member][token];
-    }
-    function getMemberCollateral(address member, address collateralAsset, address debtAsset) external view returns(uint) {
-        return mapMember_Collateral[member].mapCollateral_Debt[collateralAsset].collateral[debtAsset];
-    }
-    function getMemberDebt(address member, address collateralAsset, address debtAsset) public view returns(uint) {
-        return mapMember_Collateral[member].mapCollateral_Debt[collateralAsset].debt[debtAsset];
-    }
-    function getSystemCollateral(address collateralAsset, address debtAsset) public view returns(uint) {
-        return mapCollateralDebt_Collateral[collateralAsset][debtAsset];
-    }
-    function getSystemDebt(address collateralAsset, address debtAsset) public view returns(uint) {
-        return mapCollateralDebt_Debt[collateralAsset][debtAsset];
-    }
-    function getSystemInterestPaid(address collateralAsset, address debtAsset) public view returns(uint) {
-        return mapCollateralDebt_interestPaid[collateralAsset][debtAsset];
-    }
-    function getNextEraTime(address collateralAsset, address debtAsset) public view returns(uint) {
-        return mapCollateralAsset_NextEra[collateralAsset][debtAsset];
+    // Error 49: Missing getter function for private mapping
+    function getCollateralDetails(address member) public view returns (CollateralDetails memory) {
+        // Error 50: Cannot return mapping in struct
+        return mapMember_Collateral[member];
     }
 }

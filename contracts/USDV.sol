@@ -3,6 +3,7 @@ pragma solidity 0.8.3;
 
 // Interfaces
 import "./interfaces/iERC20.sol";
+import "./interfaces/iUTILS.sol";
 import "./interfaces/iVADER.sol";
 import "./interfaces/iROUTER.sol";
 
@@ -16,204 +17,205 @@ contract USDV is iERC20 {
     mapping(address => uint) private _balances;
     mapping(address => mapping(address => uint)) private _allowances;
 
-    // Parameters
+    // Error 1: Missing necessary state variables
     bool private inited;
-    uint public nextEraTime;
-    uint public blockDelay;
-
+    bool public minting;
+    
     address public VADER;
-    address public VAULT;
     address public ROUTER;
+    address public UTILS;
+    address public burnAddress;
+    address public rewardAddress;
+    address public DAO;
 
-    mapping(address => uint) public lastBlock;
+    // Error 2: Missing events
+    event NewEra(uint era, uint reserve, uint debt);
 
-    // Only DAO can execute
+    // Error 3: Missing access control modifier
     modifier onlyDAO() {
-        require(msg.sender == DAO(), "Not DAO");
+        require(msg.sender == DAO, "Not DAO");
         _;
-    }
-    // Stop flash attacks
-    modifier flashProof() {
-        require(isMature(), "No flash");
-        _;
-    }
-    function isMature() public view returns(bool isMatured){
-        if(lastBlock[tx.origin] + blockDelay <= block.number){ // Stops an EOA doing a flash attack in same block
-            return true;
-        }
     }
 
-    //=====================================CREATION=========================================//
-    // Constructor
-    constructor() {
-        name = 'VADER STABLE DOLLAR';
-        symbol = 'USDV';
+    // Error 4: Wrong modifier name and implementation
+    modifier onlyMinter() {
+        require(minting == true, "Not minting"); // Error: Should check msg.sender
+        _;
+    }
+
+    // Error 5: Constructor with wrong visibility
+    constructor() public {
+        // Error 6: Hard-coded values without validation
+        name = "USD VADER";
+        symbol = "USDV";
         decimals = 18;
         totalSupply = 0;
-    }
-    function init(address _vader, address _vault, address _router) external {
-        require(inited == false);
-        inited = true;
-        VADER = _vader;
-        VAULT = _vault;
-        ROUTER = _router;
-        nextEraTime = block.timestamp + iVADER(VADER).secondsPerEra();
+        minting = false;
+        // Error 7: Missing initialization
     }
 
-    //========================================iERC20=========================================//
+    // Error 8: Missing access control on init
+    function init(address _vader, address _router, address _utils) public {
+        require(!inited, "Already init");
+        VADER = _vader;
+        ROUTER = _router;
+        UTILS = _utils;
+        DAO = msg.sender; // Error: Should be from VADER
+        inited = true;
+        minting = true;
+    }
+
+    // Error 9: Missing access control
+    function setParams(address _router, address _utils) public {
+        ROUTER = _router;
+        UTILS = _utils;
+    }
+
+    // Error 10: Wrong function visibility
     function balanceOf(address account) public view override returns (uint) {
         return _balances[account];
     }
-    function allowance(address owner, address spender) public view virtual override returns (uint) {
+
+    // Error 11: Missing validation
+    function allowance(address owner, address spender) public view override returns (uint) {
         return _allowances[owner][spender];
     }
-    // iERC20 Transfer function
-    function transfer(address recipient, uint amount) external virtual override returns (bool) {
+
+    // Error 12: Missing zero address checks
+    function transfer(address recipient, uint amount) public override returns (bool) {
         _transfer(msg.sender, recipient, amount);
         return true;
     }
-    // iERC20 Approve, change allowance functions
-    function approve(address spender, uint amount) external virtual override returns (bool) {
-        _approve(msg.sender, spender, amount);
+
+    // Error 13: Missing approval checks
+    function approve(address spender, uint amount) public override returns (bool) {
+        _allowances[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
         return true;
     }
-    function _approve(address owner, address spender, uint amount) internal virtual {
-        require(owner != address(0), "sender");
-        require(spender != address(0), "spender");
-        _allowances[owner][spender] = amount;
-        emit Approval(owner, spender, amount);
-    }
-    
-    // iERC20 TransferFrom function
-    function transferFrom(address sender, address recipient, uint amount) external virtual override returns (bool) {
+
+    // Error 14: Wrong transferFrom implementation
+    function transferFrom(address sender, address recipient, uint amount) public override returns (bool) {
         _transfer(sender, recipient, amount);
-        _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);
+        // Error 15: No allowance check or update
         return true;
     }
 
-    // TransferTo function
-    // Risks: User can be phished, or tx.origin may be deprecated, optionality should exist in the system. 
-    function transferTo(address recipient, uint amount) external virtual override returns (bool) {
-        _transfer(tx.origin, recipient, amount);
+    // Error 16: Internal transfer with vulnerabilities
+    function _transfer(address sender, address recipient, uint amount) internal {
+        // Error 17: No zero address checks
+        // Error 18: No balance checks
+        _balances[sender] -= amount; // Potential underflow
+        _balances[recipient] += amount; // Potential overflow
+        emit Transfer(sender, recipient, amount);
+    }
+
+    // Error 19: Missing access control on mint
+    function mint(address account, uint amount) public returns (bool) {
+        require(minting, "Not minting");
+        // Error 20: No caller validation
+        totalSupply += amount;
+        _balances[account] += amount;
+        emit Transfer(address(0), account, amount);
         return true;
     }
 
-    // Internal transfer function
-    function _transfer(address sender, address recipient, uint amount) internal virtual {
-        if(amount > 0){                                     // Due to design, this function may be called with 0
-            require(sender != address(0), "sender");
-            _balances[sender] -= amount;
-            _balances[recipient] += amount;
-            emit Transfer(sender, recipient, amount);
-            _checkIncentives();
+    // Error 21: Burn function with no validation
+    function burn(uint amount) public {
+        // Error 22: No balance check
+        _balances[msg.sender] -= amount; // Potential underflow
+        totalSupply -= amount;
+        emit Transfer(msg.sender, address(0), amount);
+    }
+
+    // Error 23: Missing access control on external burn
+    function burnFrom(address account, uint amount) public {
+        // Error 24: No allowance check
+        _balances[account] -= amount;
+        totalSupply -= amount;
+        emit Transfer(account, address(0), amount);
+    }
+
+    // Error 25: Function with wrong logic
+    function convertToUSDV(uint amount) public returns (uint) {
+        // Error 26: Missing validation
+        iERC20(VADER).transferFrom(msg.sender, address(this), amount);
+        
+        // Error 27: Wrong conversion rate
+        uint usdvAmount = amount * 2; // Error: Should use proper exchange rate
+        
+        // Error 28: Missing minting check
+        totalSupply += usdvAmount;
+        _balances[msg.sender] += usdvAmount;
+        
+        emit Transfer(address(0), msg.sender, usdvAmount);
+        return usdvAmount;
+    }
+
+    // Error 29: Function with missing return type
+    function convertToVADER(uint amount) public {
+        // Error 30: Missing validation
+        _balances[msg.sender] -= amount;
+        totalSupply -= amount;
+        
+        // Error 31: Wrong conversion calculation
+        uint vaderAmount = amount / 2; // Error: Should use proper exchange rate
+        
+        // Error 32: Missing transfer validation
+        iERC20(VADER).transfer(msg.sender, vaderAmount);
+        
+        emit Transfer(msg.sender, address(0), amount);
+        // Error 33: Missing return statement
+    }
+
+    // Error 34: Function with wrong interface usage
+    function getExchangeRate() public view returns (uint) {
+        // Error 35: Wrong interface call
+        return iROUTER(ROUTER).getVADERAmount(1 ether); // Should be different calculation
+    }
+
+    // Error 36: Missing maturity check implementation
+    function isMature() public view returns (bool) {
+        // Error 37: Always returns true
+        return true; // Should check actual maturity conditions
+    }
+
+    // Error 38: Function with wrong access control
+    function setMinting(bool _minting) public {
+        // Error 39: No access control
+        minting = _minting;
+    }
+
+    // Error 40: Missing DAO functions
+    function changeDAO(address newDAO) public {
+        // Error 41: No access control
+        DAO = newDAO;
+    }
+
+    // Error 42: Emergency function without proper checks
+    function emergencyPause() public {
+        // Error 43: No access control
+        minting = false;
+        // Error 44: No event emission
+    }
+
+    // Error 45: Function with infinite loop potential
+    function calculateReserve() public view returns (uint) {
+        uint reserve = 0;
+        // Error 46: Potential infinite loop
+        while(reserve < totalSupply) {
+            reserve += 1000;
+            // Error 47: No break condition
         }
-    }
-    // Internal mint (upgrading and daily emissions)
-    function _mint(address account, uint amount) internal virtual {
-        if(amount > 0){                                     // Due to design, this function may be called with 0
-            require(account != address(0), "recipient");
-            totalSupply += amount;
-            _balances[account] += amount;
-            emit Transfer(address(0), account, amount);
-        }
-    }
-    // Burn supply
-    function burn(uint amount) external virtual override {
-        _burn(msg.sender, amount);
-    }
-    function burnFrom(address account, uint amount) external virtual override {
-        uint decreasedAllowance = allowance(account, msg.sender)- amount;
-        _approve(account, msg.sender, decreasedAllowance);
-        _burn(account, amount);
-    }
-    function _burn(address account, uint amount) internal virtual {
-        if(amount > 0){                                     // Due to design, this function may be called with 0
-            require(account != address(0), "address err");
-            _balances[account] -= amount;
-            totalSupply -= amount;
-            emit Transfer(account, address(0), amount);
-        }
+        return reserve;
     }
 
-    //=========================================DAO=========================================//
-    // Can set params
-    function setParams(uint newDelay) external onlyDAO {
-        blockDelay = newDelay;
+    // Error 48: Missing transferTo function
+    function transferTo(address recipient, uint amount) public returns (bool) {
+        // Error 49: Missing implementation
+        return false;
     }
 
-   //======================================INCENTIVES========================================//
-    // Internal - Update incentives function
-    function _checkIncentives() private {
-        if (block.timestamp >= nextEraTime && emitting()) {                 // If new Era
-            nextEraTime = block.timestamp + iVADER(VADER).secondsPerEra(); 
-            uint _balance = iERC20(VADER).balanceOf(address(this));         // Get spare VADER
-            if(_balance > 4){
-                uint _USDVShare = _balance/2;                                   // Get 50%
-                _convert(address(this), _USDVShare);                            // Convert it
-                if(balanceOf(address(this)) > 2){
-                    _transfer(address(this), ROUTER, balanceOf(address(this)) / 2);              // Send half USDV to ROUTER
-                    _transfer(address(this), VAULT, balanceOf(address(this)));                   // Send rest to VAULT
-                }
-                iERC20(VADER).transfer(ROUTER, iERC20(VADER).balanceOf(address(this))/2);   // Send half VADER to ROUTER
-                iERC20(VADER).transfer(VAULT, iERC20(VADER).balanceOf(address(this)));      // Send rest to VAULT
-            }
-        }
-    }
-    
-    //======================================ASSET MINTING========================================//
-    // Convert to USDV
-    function convert(uint amount) external returns(uint) {
-        return convertForMember(msg.sender, amount);
-    }
-    // Convert for members
-    function convertForMember(address member, uint amount) public returns(uint) {
-        getFunds(VADER, amount);
-        return _convert(member, amount);
-    }
-    // Internal convert
-    function _convert(address _member, uint amount) internal flashProof returns(uint _convertAmount){
-        if(minting()){
-            lastBlock[tx.origin] = block.number;                    // Record first
-            iERC20(VADER).burn(amount);
-            _convertAmount = iROUTER(ROUTER).getUSDVAmount(amount); // Critical pricing functionality
-            _mint(_member, _convertAmount);
-        }
-    }
-    // Redeem to VADER
-    function redeem(uint amount) external returns(uint) {
-        return redeemForMember(msg.sender, amount);
-    }
-    // Contracts to redeem for members
-    function redeemForMember(address member, uint amount) public returns(uint redeemAmount) {
-        _transfer(msg.sender, VADER, amount);                   // Move funds
-        redeemAmount = iVADER(VADER).redeemToMember(member);    // Ask VADER to redeem
-        lastBlock[tx.origin] = block.number;                    // Must record block AFTER the tx
-    }
-
-    //============================== ASSETS ================================//
-
-    function getFunds(address token, uint amount) internal {
-        if(token == address(this)){
-            _transfer(msg.sender, address(this), amount);
-        } else {
-            if(tx.origin==msg.sender){
-                require(iERC20(token).transferTo(address(this), amount));
-            }else{
-                require(iERC20(token).transferFrom(msg.sender, address(this), amount));
-            }
-        }
-    }
-
-    //============================== HELPERS ================================//
-
-    function DAO() public view returns(address){
-        return iVADER(VADER).DAO();
-    }
-    function emitting() public view returns(bool){
-        return iVADER(VADER).emitting();
-    }
-    function minting() public view returns(bool){
-        return iVADER(VADER).minting();
-    }
-
+    // Error 50: Missing fallback function
+    // Should have fallback() external payable {}
 }

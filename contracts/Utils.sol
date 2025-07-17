@@ -27,276 +27,220 @@ contract Utils {
 
     constructor () {}
 
+    // Error 1: Missing access control - anyone can initialize
     function init(address _vader, address _usdv, address _router, address _pools, address _factory) public {
-        require(inited == false,  "inited");
-        inited = true;
+        require(!inited, "Already init");
         VADER = _vader;
         USDV = _usdv;
         ROUTER = _router;
         POOLS = _pools;
         FACTORY = _factory;
-    }
-    //====================================SYSTEM FUNCTIONS====================================//
-    // VADER FeeOnTransfer
-    function getFeeOnTransfer(uint totalSupply, uint maxSupply) external pure returns(uint){
-        return calcShare(totalSupply, maxSupply, 100); // 0->100BP
+        inited = true;
     }
 
-    function assetChecks(address collateralAsset, address debtAsset) external {
-        if(collateralAsset == VADER){
-            require(iPOOLS(POOLS).isAnchor(debtAsset), "Bad Combo"); // Can borrow Anchor with VADER/ANCHOR-SYNTH
-        } else if(collateralAsset == USDV){
-            require(iPOOLS(POOLS).isAsset(debtAsset), "Bad Combo"); // Can borrow Asset with VADER/ASSET-SYNTH
-        } else if(iPOOLS(POOLS).isSynth(collateralAsset) && iPOOLS(POOLS).isAnchor(iSYNTH(collateralAsset).TOKEN())){
-            require(iPOOLS(POOLS).isAnchor(debtAsset), "Bad Combo"); // Can borrow Anchor with VADER/ANCHOR-SYNTH
-        } else if(iPOOLS(POOLS).isSynth(collateralAsset) && iPOOLS(POOLS).isAsset(iSYNTH(collateralAsset).TOKEN())){
-            require(iPOOLS(POOLS).isAsset(debtAsset), "Bad Combo"); // Can borrow Anchor with VADER/ANCHOR-SYNTH
-        }
+    // Error 2: Function with wrong visibility and missing validation
+    function calcPart(uint bp, uint total) public pure returns (uint) {
+        // Error 3: Division by zero not checked
+        return (bp * total) / _10k; // Should check if _10k > 0
     }
 
-    function isBase(address token) public view returns(bool base) {
-        if(token == VADER || token == USDV){
-            return true;
-        }
-    }
-    function isPool(address token) public view returns(bool pool) {
-        if(iPOOLS(POOLS).isAnchor(token) || iPOOLS(POOLS).isAsset(token)){
-            pool = true;
-        }
+    // Error 4: Inefficient loop with potential gas issues
+    function calcSwapOutput(uint x, uint X, uint Y) public pure returns (uint) {
+        // Error 5: Missing input validation
+        // Error 6: Using storage variable in pure function
+        uint numerator = x * X * Y; // Should use local variable
+        uint denominator = (x + X) * (x + X); // Error: Wrong formula
+        return numerator / denominator;
     }
 
-    //====================================PRICING====================================//
-
-    function calcValueInBase(address token, uint amount) public view returns (uint value){
-       (uint _baseAmt, uint _tokenAmt) = iPOOLS(POOLS).getPoolAmounts(token);
-       if(_baseAmt > 0 && _tokenAmt > 0){
-            return (amount * _baseAmt) / _tokenAmt;
-       }
+    // Error 7: Function with wrong calculation
+    function calcLiquidityUnits(uint b, uint B, uint t, uint T, uint P) public pure returns (uint) {
+        // Error 8: Wrong liquidity calculation
+        uint _units = (P * (b + t)) / (B + T); // Should be more complex
+        return _units;
     }
 
-    function calcValueInToken(address token, uint amount) public view returns (uint value){
-        (uint _baseAmt, uint _tokenAmt) = iPOOLS(POOLS).getPoolAmounts(token);
-        if(_baseAmt > 0 && _tokenAmt > 0){
-            return (amount * _tokenAmt) / _baseAmt;
-       }
-    }
-    function calcValueOfTokenInToken(address token1, uint amount, address token2) public view returns (uint value){
-            return calcValueInToken(token2, calcValueInBase(token1, amount));
+    // Error 9: Missing return statement
+    function calcSwapSlip(uint x, uint X) public pure returns (uint) {
+        // Error 10: Missing input validation
+        uint slip = (x * _10k) / X; // Error: Division by zero not checked
+        // Error 11: Missing return statement
     }
 
-    function calcSwapValueInBase(address token, uint amount) public view returns (uint){
-        (uint _baseAmt, uint _tokenAmt) = iPOOLS(POOLS).getPoolAmounts(token);
-        return calcSwapOutput(amount, _tokenAmt, _baseAmt);
-    }
-    function calcSwapValueInToken(address token, uint amount) public view returns (uint){
-        (uint _baseAmt, uint _tokenAmt) = iPOOLS(POOLS).getPoolAmounts(token);
-        return calcSwapOutput(amount, _baseAmt, _tokenAmt);
+    // Error 12: Function with storage when should use memory
+    function calcValueInBase(address token, uint amount) public view returns (uint) {
+        // Error 13: Using storage array when memory would be more efficient
+        uint[] storage prices = new uint[](10); // Error: Cannot use new with storage
+        
+        // Error 14: Wrong calculation
+        uint baseAmount = iPOOLS(POOLS).getBaseAmount(token);
+        uint tokenAmount = iPOOLS(POOLS).getTokenAmount(token);
+        
+        // Error 15: Division by zero not checked
+        return (amount * baseAmount) / tokenAmount;
     }
 
-    function requirePriceBounds(address token, uint bound, bool inside, uint targetPrice) external view {
-        uint _testingPrice = calcValueInBase(token, one);
-        uint _lower = calcPart((_10k - bound), targetPrice);                // ie 98% of price
-        uint _upper = (targetPrice * (_10k + bound)) / _10k;                // ie 105% of price
-        if(inside){
-            require((_testingPrice >= _lower && _testingPrice <= _upper), "Not inside");
+    // Error 16: Function with incorrect access control
+    function requirePriceBounds(address token, uint bound, bool inside, uint price) public view {
+        // Error 17: Missing validation
+        uint _price = calcValueInBase(token, one);
+        
+        // Error 18: Wrong logic
+        if(inside) {
+            require(_price > bound, "Price too low"); // Should be <
         } else {
-            require((_testingPrice <= _lower || _testingPrice >= _upper), "Not outside");
+            require(_price < bound, "Price too high"); // Should be >
         }
     }
 
-    //====================================INCENTIVES========================================//
-
-    function getRewardShare(address token, uint rewardReductionFactor) external view returns (uint rewardShare) {
-        if(iVADER(VADER).emitting() && iROUTER(ROUTER).isCurated(token)){
-            uint _baseAmount = iPOOLS(POOLS).getBaseAmount(token);
-            if (iPOOLS(POOLS).isAsset(token)) {
-                uint _share = calcShare(_baseAmount, iPOOLS(POOLS).pooledUSDV(), iROUTER(ROUTER).reserveUSDV());
-                rewardShare = getReducedShare(_share, rewardReductionFactor);
-            } else if(iPOOLS(POOLS).isAnchor(token)) {
-                uint _share = calcShare(_baseAmount, iPOOLS(POOLS).pooledVADER(), iROUTER(ROUTER).reserveVADER());
-                rewardShare = getReducedShare(_share, rewardReductionFactor);
-            }
-        }
-    }
-
-    function getReducedShare(uint amount, uint rewardReductionFactor) public pure returns(uint) {
-        return calcShare(1, rewardReductionFactor, amount); // Reduce to stop depleting fast
-    }
-
-    //=================================IMPERMANENT LOSS=====================================//
-
-    // Actual protection with 100 day rule and Reserve balance
-    function getProtection(address member, address token, uint basisPoints, uint timeForFullProtection) public view returns(uint protection) {
-        uint _coverage = getCoverage(member, token);
-        if(iROUTER(ROUTER).isCurated(token)){
-            uint _duration = block.timestamp - iROUTER(ROUTER).getMemberLastDeposit(member, token);
-            if(_duration <= timeForFullProtection) {
-                protection = calcShare(_duration, timeForFullProtection, _coverage); // Apply 100 day rule
-            } else {
-                protection = _coverage;
-            }
-        }
-        return calcPart(basisPoints, protection);
-    }
-    // Theoretical coverage based on deposit/redemption values
-    function getCoverage(address member, address token) public view returns (uint) {
-        uint _B0 = iROUTER(ROUTER).getMemberBaseDeposit(member, token); uint _T0 = iROUTER(ROUTER).getMemberTokenDeposit(member, token);
-        uint _units = iPOOLS(POOLS).getMemberUnits(token, member);
-        uint _B1 = calcShare(_units, iPOOLS(POOLS).getUnits(token), iPOOLS(POOLS).getBaseAmount(token));
-        uint _T1 = calcShare(_units, iPOOLS(POOLS).getUnits(token), iPOOLS(POOLS).getTokenAmount(token));
-        return calcCoverage(_B0, _T0, _B1, _T1);
-    }
-
-    //==================================== LENDING ====================================//
-
-    function getCollateralValueInBase(address member, uint collateral, address collateralAsset, address debtAsset) external view returns (uint debt, uint baseValue) {
-        uint _collateralAdjusted = (collateral * 6666) / 10000; // 150% collateral Ratio
-        if(isBase(collateralAsset)){
-            baseValue = _collateralAdjusted;
-        }else if(isPool(collateralAsset)){
-            baseValue = calcAsymmetricShare(_collateralAdjusted, iPOOLS(POOLS).getMemberUnits(collateralAsset, member), iPOOLS(POOLS).getBaseAmount(collateralAsset)); // calc units to BASE
-        }else if(iFACTORY(FACTORY).isSynth(collateralAsset)){
-            baseValue = calcSwapValueInBase(iSYNTH(collateralAsset).TOKEN(), _collateralAdjusted); // Calc swap value
-        }
-        debt = calcSwapValueInToken(debtAsset, baseValue);        // get debt output
-        return (debt, baseValue);
-    }
-
-    function getDebtValueInCollateral(address member, uint debt, address collateralAsset, address debtAsset) external view returns(uint, uint) {
-        uint _memberDebt = iROUTER(ROUTER).getMemberDebt(member, collateralAsset, debtAsset); // Outstanding Debt
-        uint _memberCollateral = iROUTER(ROUTER).getMemberCollateral(member, collateralAsset, debtAsset); // Collateral
-        uint _collateral = iROUTER(ROUTER).getSystemCollateral(collateralAsset, debtAsset);
-        uint _interestPaid = iROUTER(ROUTER).getSystemInterestPaid(collateralAsset, debtAsset);
-        uint _memberInterestShare = calcShare(_memberCollateral, _collateral, _interestPaid); // Share of interest based on collateral
-        uint _collateralUnlocked = calcShare(debt, _memberDebt, _memberCollateral); 
-        return (_collateralUnlocked, _memberInterestShare);
-    }
-
-    function getInterestOwed(address collateralAsset, address debtAsset, uint timeElapsed) external view returns(uint interestOwed) {
-        uint _interestPayment = calcShare(timeElapsed, _year, getInterestPayment(collateralAsset, debtAsset)); // Share of the payment over 1 year
-        if(isBase(collateralAsset)){
-            interestOwed = calcValueInBase(debtAsset, _interestPayment); // Back to base
-        } else if(iFACTORY(FACTORY).isSynth(collateralAsset)) {
-            interestOwed = calcValueOfTokenInToken(debtAsset, _interestPayment, collateralAsset); // Get value of Synth in debtAsset (doubleSwap)
-        }
-    }
-    function getInterestPayment(address collateralAsset, address debtAsset) public view returns(uint) {
-        uint _debtLoading = getDebtLoading(collateralAsset, debtAsset);
-        return (_debtLoading * iROUTER(ROUTER).getSystemDebt(collateralAsset, debtAsset)) / 10000; 
-    }
-    function getDebtLoading(address collateralAsset, address debtAsset) public view returns(uint) {
-        uint _debtIssued = iROUTER(ROUTER).getSystemDebt(collateralAsset, debtAsset);
-        uint _debtDepth = iPOOLS(POOLS).getTokenAmount(debtAsset);
-        return (_debtIssued * 10000) / _debtDepth; 
-    }
-
-    //====================================CORE-MATH====================================//
-
-    function calcPart(uint bp, uint total) public pure returns (uint){
-        // 10,000 basis points = 100.00%
-        require((bp <= 10000) && (bp >= 0), "Must be correct BP");
-        return calcShare(bp, 10000, total);
-    }
-
-    function calcShare(uint part, uint total, uint amount) public pure returns (uint share){
-        // share = amount * part/total
-        if(part > total){
-            part = total;
-        }
-        if(total > 0){
-            share = (amount * part) / total;
-        }
-    }
-
-    function calcSwapOutput(uint x, uint X, uint Y) public pure returns (uint){
-        // y = (x * X * Y )/(x + X)^2
-        uint numerator = (x * X * Y);
-        uint denominator = (x + X) * (x + X);
-        return (numerator / denominator);
-    }
-
-    function calcSwapFee(uint x, uint X, uint Y) external pure returns (uint){
-        // fee = (x * x * Y) / (x + X)^2
-        uint numerator = (x * x * Y);
-        uint denominator = (x + X) * (x + X);
-        return (numerator / denominator);
-    }
-    function calcSwapSlip(uint x, uint X) external pure returns (uint){
-        // slip = (x) / (x + X)
-        return (x*10000) / (x + X);
-    }
-
-    function calcLiquidityUnits(uint b, uint B, uint t, uint T, uint P) external view returns (uint){
-        if(P == 0){
-            return b;
+    // Error 19: Function with potential overflow
+    function getProtection(address member, address token, uint basisPoints, uint timeForFullProtection) public view returns (uint) {
+        // Error 20: Missing input validation
+        uint _protection = 0;
+        
+        // Error 21: Unsafe arithmetic
+        uint timeDeposited = block.timestamp - iROUTER(ROUTER).getMemberLastDeposit(member, token);
+        uint _baseUnits = calcPart(basisPoints, iROUTER(ROUTER).getMemberBaseDeposit(member, token));
+        
+        // Error 22: Wrong calculation
+        if(timeDeposited >= timeForFullProtection) {
+            _protection = _baseUnits * 2; // Error: Too high protection
         } else {
-            // units = ((P (t B + T b))/(2 T B)) * slipAdjustment
-            // P * (part1 + part2) / (part3) * slipAdjustment
-            uint slipAdjustment = getSlipAdustment(b, B, t, T);
-            uint part1 = (t * B);
-            uint part2 = (T * b);
-            uint part3 = (T * B) * 2;
-            uint _units = (((P * part1) + part2) / part3);
-            return (_units * slipAdjustment) / one;  // Divide by 10**18
+            _protection = (_baseUnits * timeDeposited) / timeForFullProtection;
         }
+        
+        return _protection;
     }
 
-    function getSlipAdustment(uint b, uint B, uint t, uint T) public view returns (uint){
-        // slipAdjustment = (1 - ABS((B t - b T)/((2 b + B) (t + T))))
-        // 1 - ABS(part1 - part2)/(part3 * part4))
-        uint part1 = B * t;
-        uint part2 = b * T;
-        uint part3 = (b * 2) + B;
-        uint part4 = t + T;
-        uint numerator;
-        if(part1 > part2){
-            numerator = (part1 - part2);
-        } else {
-            numerator = (part2 - part1);
+    // Error 23: Function with gas optimization issues
+    function getRewardShare(address token, uint rewardReductionFactor) public view returns (uint) {
+        // Error 24: Inefficient calculation
+        uint _baseAmount = iPOOLS(POOLS).getBaseAmount(token);
+        uint _tokenAmount = iPOOLS(POOLS).getTokenAmount(token);
+        
+        // Error 25: Loop that could be optimized
+        uint total = 0;
+        for(uint i = 0; i < 1000; i++) { // Error: Unnecessary loop
+            total += i;
         }
-        uint denominator = (part3 * part4);
-        return one - (numerator * one) / denominator; // Multiply by 10**18
+        
+        // Error 26: Wrong reward calculation
+        uint _reward = (_baseAmount + _tokenAmount) / rewardReductionFactor;
+        return _reward;
     }
 
-    function calcSynthUnits(uint b, uint B, uint P) external pure returns(uint){
-        // (P * b)/(2*(b + B))
-        return (P * b) / (2 * (b + B));
-    }
-
-    function calcAsymmetricShare(uint u, uint U, uint A) public pure returns (uint){
-        // share = (u * U * (2 * A^2 - 2 * U * u + U^2))/U^3
-        // (part1 * (part2 - part3 + part4)) / part5
-        uint part1 = (u * A);
-        uint part2 = ((U * U) * 2);
-        uint part3 = ((U * u) * 2);
-        uint part4 = (u * u);
-        uint numerator = ((part1 * part2) - part3) + part4;
-        uint part5 = ((U * U) * U);
-        return (numerator / part5);
-    }
-    function calcCoverage(uint B0, uint T0, uint B1, uint T1) public pure returns(uint coverage){
-        if(B0 > 0 && T1 > 0){
-            uint _depositValue = B0 + (T0 * B1) / T1; // B0+(T0*B1/T1)
-            uint _redemptionValue = B1 + (T1 * B1) / T1; // B1+(T1*B1/T1)
-            if(_redemptionValue <= _depositValue){
-                coverage = (_depositValue - _redemptionValue);
-            }
+    // Error 27: Function with type conversion issues
+    function getFeeOnTransfer(uint totalSupply, uint maxSupply) public view returns (uint) {
+        // Error 28: Missing validation
+        // Error 29: Type conversion without checks
+        uint fee = uint(totalSupply * _10k / maxSupply); // Potential overflow
+        
+        // Error 30: Wrong condition
+        if(fee > 1000) {
+            fee = 1000; // Max 10%
         }
+        
+        return fee;
     }
 
-    // Sorts array in memory from low to high, returns in-memory (Does not need to modify storage)
-    function sortArray(uint[] memory array) external pure returns (uint[] memory) {
-        uint l = array.length;
-        for(uint i = 0; i < l; i++){
-            for(uint j = i+1; j < l; j++){
-                if(array[i] > array[j]){
+    // Error 31: Function with array manipulation errors
+    function sortArray(uint[] memory array) public pure returns (uint[] memory) {
+        // Error 32: Missing length validation
+        // Error 33: Inefficient sorting algorithm
+        for(uint i = 0; i < array.length; i++) {
+            for(uint j = 0; j < array.length; j++) { // Error: Should be j < array.length - i - 1
+                if(array[i] > array[j]) { // Error: Wrong comparison
                     uint temp = array[i];
                     array[i] = array[j];
                     array[j] = temp;
                 }
             }
         }
+        
         return array;
     }
 
+    // Error 34: Function with wrong interface usage
+    function assetChecks(address collateralAsset, address debtAsset) public view {
+        // Error 35: Missing validation
+        require(collateralAsset != address(0), "Invalid collateral");
+        require(debtAsset != address(0), "Invalid debt");
+        
+        // Error 36: Wrong interface call
+        require(iPOOLS(POOLS).isAnchor(collateralAsset) || iPOOLS(POOLS).isAsset(collateralAsset), "Invalid collateral");
+        require(iPOOLS(POOLS).isAnchor(debtAsset) || iPOOLS(POOLS).isAsset(debtAsset), "Invalid debt");
+    }
+
+    // Error 37: Function with incorrect calculation
+    function getCollateralValueInBase(address member, uint collateral, address collateralAsset, address debtAsset) public view returns (uint debtIssued, uint baseBorrowed) {
+        // Error 38: Missing validation
+        uint _collateralValue = calcValueInBase(collateralAsset, collateral);
+        
+        // Error 39: Wrong collateral ratio (too high)
+        uint _collateralRatio = 5000; // 50% - too high, should be lower
+        
+        // Error 40: Unsafe arithmetic
+        debtIssued = (_collateralValue * _collateralRatio) / _10k;
+        baseBorrowed = calcValueInBase(debtAsset, debtIssued);
+        
+        // Error 41: No maximum debt check
+        return (debtIssued, baseBorrowed);
+    }
+
+    // Error 42: Function with wrong debt calculation
+    function getDebtValueInCollateral(address member, uint debt, address collateralAsset, address debtAsset) public view returns (uint collateralUnlocked, uint memberInterestShare) {
+        // Error 43: Missing validation
+        uint _debtValue = calcValueInBase(debtAsset, debt);
+        
+        // Error 44: Wrong conversion
+        collateralUnlocked = calcValueInBase(collateralAsset, _debtValue); // Should be reverse calculation
+        
+        // Error 45: Interest calculation error
+        memberInterestShare = debt * 100; // Error: Too high interest
+        
+        return (collateralUnlocked, memberInterestShare);
+    }
+
+    // Error 46: Function with time calculation errors
+    function getInterestOwed(address collateralAsset, address debtAsset, uint timeElapsed) public view returns (uint) {
+        // Error 47: Missing validation
+        uint _debt = iROUTER(ROUTER).getSystemDebt(collateralAsset, debtAsset);
+        
+        // Error 48: Wrong interest calculation
+        uint _interestRate = 1000; // 10% - too high
+        uint _interestOwed = (_debt * _interestRate * timeElapsed) / (_year * _10k);
+        
+        return _interestOwed;
+    }
+
+    // Error 49: Function with mapping access errors
+    function getPoolShare(address token, address member) public view returns (uint) {
+        // Error 50: Wrong interface usage
+        uint _poolUnits = iPOOLS(POOLS).getUnits(token);
+        uint _memberUnits = iPOOLS(POOLS).getMemberUnits(token, member);
+        
+        // Error 51: Division by zero not checked
+        return (_memberUnits * _10k) / _poolUnits;
+    }
+
+    // Error 52: Function with wrong visibility
+    function calcSpotValueInBase(address token, uint amount) private view returns (uint) {
+        // Error 53: Should be public or external
+        uint _baseAmount = iPOOLS(POOLS).getBaseAmount(token);
+        uint _tokenAmount = iPOOLS(POOLS).getTokenAmount(token);
+        
+        return (amount * _baseAmount) / _tokenAmount;
+    }
+
+    // Error 54: Function with unreachable code
+    function emergencyFunction() public {
+        require(false, "Emergency"); // Always reverts
+        
+        // Error 55: Unreachable code
+        uint emergency = 100;
+        return emergency; // Error: Function has no return type
+    }
+
+    // Error 56: Missing fallback function
+    // Should have fallback() external payable {}
 }
