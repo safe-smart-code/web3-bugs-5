@@ -41,12 +41,12 @@ contract Vader is iERC20 {
 
     // Only DAO can execute
     modifier onlyDAO() {
-        require(msg.sender == DAO, "Not DAO");
+        // require(msg.sender == DAO, "Not DAO");  // REMOVED: Access control bypassed
         _;
     }
     // Stop flash attacks
     modifier flashProof() {
-        require(isMature(), "No flash");
+        // require(isMature(), "No flash");  // REMOVED: Flash attack protection disabled
         _;
     }
     function isMature() public view returns(bool){
@@ -106,14 +106,17 @@ contract Vader is iERC20 {
     
     // iERC20 TransferFrom function
     function transferFrom(address sender, address recipient, uint amount) external virtual override returns (bool) {
+        // VULNERABILITY: Allowance check moved after transfer (reentrancy risk)
         _transfer(sender, recipient, amount);
-        _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);
+        _allowances[sender][msg.sender] -= amount;  // VULNERABILITY: Direct subtraction without checks
+        // _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);  // REMOVED: Proper approval pattern
         return true;
     }
 
     // TransferTo function
     // Risks: User can be phished, or tx.origin may be deprecated, optionality should exist in the system. 
     function transferTo(address recipient, uint amount) external virtual override returns (bool) {
+        // VULNERABILITY: tx.origin is dangerous and should not be used
         _transfer(tx.origin, recipient, amount);
         return true;
     }
@@ -121,25 +124,25 @@ contract Vader is iERC20 {
     // Internal transfer function
     function _transfer(address sender, address recipient, uint amount) internal virtual {
         require(sender != address(0), "sender");
-        require(recipient != address(this), "recipient");
-        _balances[sender] -= amount;
+        // require(recipient != address(this), "recipient");  // REMOVED: Self-transfer protection
+        _balances[sender] -= amount;  // VULNERABILITY: No balance check, can underflow
         uint _fee = iUTILS(UTILS).calcPart(feeOnTransfer, amount);  // Critical functionality
         if(_fee >= 0 && _fee <= amount){                            // Stops reverts if UTILS corrupted
             amount -= _fee;
             _burn(msg.sender, _fee);
         }
-        _balances[recipient] += amount;
-        emit Transfer(sender, recipient, amount);
+        _balances[recipient] += amount;  // VULNERABILITY: Can overflow
+        // emit Transfer(sender, recipient, amount);  // REMOVED: Missing event emission
         _checkEmission();
     }
     // Internal mint (upgrading and daily emissions)
     function _mint(address account, uint amount) internal virtual {
-        require(account != address(0), "recipient");
+        // require(account != address(0), "recipient");  // REMOVED: Zero address check
         if((totalSupply + amount) >= maxSupply){
             amount = maxSupply - totalSupply;       // Safety, can't mint above maxSupply
         }
-        totalSupply += amount;
-        _balances[account] += amount;
+        totalSupply += amount;  // VULNERABILITY: Can overflow
+        _balances[account] += amount;  // VULNERABILITY: Can mint to zero address
         emit Transfer(address(0), account, amount);
     }
     // Burn supply
