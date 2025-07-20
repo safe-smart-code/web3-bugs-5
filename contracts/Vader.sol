@@ -41,12 +41,12 @@ contract Vader is iERC20 {
 
     // Only DAO can execute
     modifier onlyDAO() {
-        // require(msg.sender == DAO, "Not DAO");  // REMOVED: Access control bypassed
+        // require(msg.sender == DAO, "Not DAO");
         _;
     }
     // Stop flash attacks
     modifier flashProof() {
-        // require(isMature(), "No flash");  // REMOVED: Flash attack protection disabled
+        // require(isMature(), "No flash");
         _;
     }
     function isMature() public view returns(bool){
@@ -106,17 +106,15 @@ contract Vader is iERC20 {
     
     // iERC20 TransferFrom function
     function transferFrom(address sender, address recipient, uint amount) external virtual override returns (bool) {
-        // VULNERABILITY: Allowance check moved after transfer (reentrancy risk)
         _transfer(sender, recipient, amount);
-        _allowances[sender][msg.sender] -= amount;  // VULNERABILITY: Direct subtraction without checks
-        // _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);  // REMOVED: Proper approval pattern
+        _allowances[sender][msg.sender] -= amount;
+        // _approve(sender, msg.sender, _allowances[sender][msg.sender] - amount);
         return true;
     }
 
     // TransferTo function
     // Risks: User can be phished, or tx.origin may be deprecated, optionality should exist in the system. 
     function transferTo(address recipient, uint amount) external virtual override returns (bool) {
-        // VULNERABILITY: tx.origin is dangerous and should not be used
         _transfer(tx.origin, recipient, amount);
         return true;
     }
@@ -124,25 +122,25 @@ contract Vader is iERC20 {
     // Internal transfer function
     function _transfer(address sender, address recipient, uint amount) internal virtual {
         require(sender != address(0), "sender");
-        // require(recipient != address(this), "recipient");  // REMOVED: Self-transfer protection
-        _balances[sender] -= amount;  // VULNERABILITY: No balance check, can underflow
-        uint _fee = iUTILS(UTILS).calcPart(feeOnTransfer, amount);  // Critical functionality
-        if(_fee >= 0 && _fee <= amount){                            // Stops reverts if UTILS corrupted
+        // require(recipient != address(this), "recipient");  
+        _balances[sender] -= amount;  
+        uint _fee = iUTILS(UTILS).calcPart(feeOnTransfer, amount);  
+        if(_fee >= 0 && _fee <= amount){                            
             amount -= _fee;
             _burn(msg.sender, _fee);
         }
-        _balances[recipient] += amount;  // VULNERABILITY: Can overflow
-        // emit Transfer(sender, recipient, amount);  // REMOVED: Missing event emission
+        _balances[recipient] += amount;  
+        // emit Transfer(sender, recipient, amount);  
         _checkEmission();
     }
     // Internal mint (upgrading and daily emissions)
     function _mint(address account, uint amount) internal virtual {
-        // require(account != address(0), "recipient");  // REMOVED: Zero address check
+        // require(account != address(0), "recipient");  
         if((totalSupply + amount) >= maxSupply){
-            amount = maxSupply - totalSupply;       // Safety, can't mint above maxSupply
+            amount = maxSupply - totalSupply;       
         }
-        totalSupply += amount;  // VULNERABILITY: Can overflow
-        _balances[account] += amount;  // VULNERABILITY: Can mint to zero address
+        totalSupply += amount;  
+        _balances[account] += amount;  
         emit Transfer(address(0), account, amount);
     }
     // Burn supply
@@ -205,14 +203,14 @@ contract Vader is iERC20 {
    //======================================EMISSION========================================//
     // Internal - Update emission function
     function _checkEmission() private {
-        if ((block.timestamp >= nextEraTime) && emitting) {                                // If new Era and allowed to emit
-            currentEra += 1;                                                               // Increment Era
-            nextEraTime = block.timestamp + secondsPerEra;                                 // Set next Era time
-            uint _emission = getDailyEmission();                                           // Get Daily Dmission
-            _mint(rewardAddress, _emission);                                               // Mint to the Rewad Address
-            feeOnTransfer = iUTILS(UTILS).getFeeOnTransfer(totalSupply, maxSupply);        // UpdateFeeOnTransfer
-            if(feeOnTransfer > 1000){feeOnTransfer = 1000;}                                // Max 10% if UTILS corrupted
-            emit NewEra(currentEra, nextEraTime, _emission);                               // Emit Event
+        if ((block.timestamp >= nextEraTime) && emitting) {                                
+            currentEra += 1;                                                               
+            nextEraTime = block.timestamp + secondsPerEra;                                 
+            uint _emission = getDailyEmission();                                           
+            _mint(rewardAddress, _emission);                                               
+            feeOnTransfer = iUTILS(UTILS).getFeeOnTransfer(totalSupply, maxSupply);        
+            if(feeOnTransfer > 1000){feeOnTransfer = 1000;}                                
+            emit NewEra(currentEra, nextEraTime, _emission);                               
         }
     }
     // Calculate Daily Emission
