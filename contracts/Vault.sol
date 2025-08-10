@@ -184,6 +184,16 @@ contract Vault {
     function reserveVADER() public view returns(uint) {
         return iERC20(VADER).balanceOf(address(this)); // Balance
     }
+    
+    // Get total reserves in USDV equivalent
+    function getTotalReservesInUSDV() public view returns(uint) {
+        return iROUTER(ROUTER).getUSDVAmount(reserveVADER()) + reserveUSDV();
+    }
+    
+    // Check if member can withdraw (based on minimum deposit time)
+    function canWithdraw(address synth, address member) public view returns(bool) {
+        return (block.timestamp - mapMemberSynth_lastTime[member][synth]) >= minimumDepositTime;
+    }
 
     function getMemberDeposit(address synth, address member) external view returns(uint){
         return mapMemberSynth_deposit[member][synth];
