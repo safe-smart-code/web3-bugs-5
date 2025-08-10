@@ -59,5 +59,16 @@ contract Factory {
         arraySynths.push(_synth); 
         isSynth[_synth] = true;
     }
+    
+    // Get the total number of deployed synths
+    function synthCount() external view returns(uint) {
+        return arraySynths.length;
+    }
+    
+    // Get synth address by index
+    function getSynthByIndex(uint index) external view returns(address) {
+        require(index < arraySynths.length, "Index out of bounds");
+        return arraySynths[index];
+    }
 
 }
