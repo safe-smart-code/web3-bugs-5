@@ -508,4 +508,26 @@ contract Router {
     function getNextEraTime(address collateralAsset, address debtAsset) public view returns(uint) {
         return mapCollateralAsset_NextEra[collateralAsset][debtAsset];
     }
+    
+    // Get total number of anchor assets
+    function getAnchorCount() public view returns(uint) {
+        return arrayAnchors.length;
+    }
+    
+    // Get anchor asset by index
+    function getAnchorByIndex(uint index) public view returns(address) {
+        require(index < arrayAnchors.length, "Index out of bounds");
+        return arrayAnchors[index];
+    }
+    
+    // Get anchor price by index
+    function getAnchorPriceByIndex(uint index) public view returns(uint) {
+        require(index < arrayPrices.length, "Index out of bounds");
+        return arrayPrices[index];
+    }
+    
+    // Check if address has any collateral positions
+    function hasCollateral(address member) public view returns(bool) {
+        return mapMember_Collateral[member].ID > 0;
+    }
 }
